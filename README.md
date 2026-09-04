@@ -29,10 +29,16 @@ Download a precompiled archive from the [GitHub releases](https://github.com/and
 
 ### Agent skill
 
-From a local checkout, install the global skill for supported coding agents:
+Install the global skill from a local clone:
 
 ```sh
-npx skills add . --global --skill docmost-cli --yes
+npx skills add /path/to/docmost-cli-rs --global --skill docmost-cli --yes
+```
+
+Or install directly from GitHub:
+
+```sh
+npx skills add https://github.com/andersou/docmost-cli-rs --global --skill docmost-cli --yes
 ```
 
 
