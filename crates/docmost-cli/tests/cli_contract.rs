@@ -1159,3 +1159,166 @@ async fn rate_limits_and_oversized_bodies_have_dedicated_messages() {
         .code(5)
         .stderr(contains("use `page import` for large files"));
 }
+
+/// Fake release archive for the platform this test binary was built for,
+/// holding `payload` where the CLI binary would be.
+fn release_archive(payload: &[u8]) -> (String, Vec<u8>) {
+    let target = env!("TARGET");
+    if target.contains("windows") {
+        let mut bytes = Vec::new();
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+        writer
+            .start_file("docmost-cli.exe", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        std::io::Write::write_all(&mut writer, payload).unwrap();
+        writer.finish().unwrap();
+        (format!("docmost-cli-9.9.9-{target}.zip"), bytes)
+    } else {
+        let mut bytes = Vec::new();
+        {
+            let encoder = flate2::write::GzEncoder::new(&mut bytes, flate2::Compression::fast());
+            let mut builder = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(payload.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "docmost-cli", payload)
+                .unwrap();
+            builder.into_inner().unwrap().finish().unwrap();
+        }
+        (format!("docmost-cli-9.9.9-{target}.tar.gz"), bytes)
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+async fn mount_release(
+    server: &MockServer,
+    tag: &str,
+    archive_name: &str,
+    archive: Vec<u8>,
+    sums: String,
+) {
+    Mock::given(method("GET"))
+        .and(path("/repos/andersou/docmost-cli-rs/releases/latest"))
+        .and(header("user-agent", format!("docmost-cli/{}", env!("CARGO_PKG_VERSION")).as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tag_name": tag,
+            "html_url": format!("https://github.com/andersou/docmost-cli-rs/releases/tag/{tag}"),
+            "assets": [
+                {"name": archive_name, "browser_download_url": format!("{}/download/{archive_name}", server.uri())},
+                {"name": "SHA256SUMS", "browser_download_url": format!("{}/download/SHA256SUMS", server.uri())},
+            ]
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/download/{archive_name}")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(archive))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/download/SHA256SUMS"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(sums))
+        .mount(server)
+        .await;
+}
+
+/// A private copy of the built CLI, so replacing it leaves the real test
+/// binary untouched.
+fn binary_copy(directory: &std::path::Path) -> std::path::PathBuf {
+    let source = assert_cmd::cargo::cargo_bin("docmost-cli");
+    let name = source.file_name().unwrap();
+    let copy = directory.join(name);
+    fs::copy(&source, &copy).unwrap();
+    copy
+}
+
+fn self_update(binary: &std::path::Path, server: &MockServer, args: &[&str]) -> Command {
+    let mut command = Command::new(binary);
+    command
+        .args(["--output", "json", "self-update"])
+        .args(args)
+        .env("DOCMOST_CLI_RELEASES_API", server.uri())
+        .env_remove("GITHUB_TOKEN");
+    command
+}
+
+#[tokio::test]
+async fn self_update_replaces_the_binary_after_verifying_the_checksum() {
+    let server = MockServer::start().await;
+    let payload = b"#!/bin/sh\necho updated\n".to_vec();
+    let (archive_name, archive) = release_archive(&payload);
+    let sums = format!("{}  {archive_name}\n", sha256_hex(&archive));
+    mount_release(&server, "v9.9.9", &archive_name, archive, sums).await;
+    let directory = tempdir().unwrap();
+    let binary = binary_copy(directory.path());
+
+    self_update(&binary, &server, &["--check"])
+        .assert()
+        .success()
+        .stdout(contains("\"update_available\": true"))
+        .stdout(contains("\"latest\": \"9.9.9\""));
+    assert_ne!(
+        fs::read(&binary).unwrap(),
+        payload,
+        "--check must not install"
+    );
+
+    self_update(&binary, &server, &[])
+        .assert()
+        .success()
+        .stdout(contains("\"updated\": true"));
+    assert_eq!(fs::read(&binary).unwrap(), payload);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(
+            fs::metadata(&binary).unwrap().permissions().mode() & 0o111,
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn self_update_refuses_archives_that_fail_the_checksum() {
+    let server = MockServer::start().await;
+    let (archive_name, archive) = release_archive(b"tampered");
+    let sums = format!("{}  {archive_name}\n", "0".repeat(64));
+    mount_release(&server, "v9.9.9", &archive_name, archive, sums).await;
+    let directory = tempdir().unwrap();
+    let binary = binary_copy(directory.path());
+    let original = fs::read(&binary).unwrap();
+
+    self_update(&binary, &server, &[])
+        .assert()
+        .code(5)
+        .stderr(contains("checksum mismatch"));
+    assert_eq!(fs::read(&binary).unwrap(), original);
+}
+
+#[tokio::test]
+async fn self_update_reports_when_already_current_without_downloading() {
+    let server = MockServer::start().await;
+    let (archive_name, archive) = release_archive(b"same");
+    let sums = format!("{}  {archive_name}\n", sha256_hex(&archive));
+    let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+    mount_release(&server, &tag, &archive_name, archive, sums).await;
+    let directory = tempdir().unwrap();
+    let binary = binary_copy(directory.path());
+    let original = fs::read(&binary).unwrap();
+
+    self_update(&binary, &server, &[])
+        .assert()
+        .success()
+        .stdout(contains("\"updated\": false"));
+    assert_eq!(fs::read(&binary).unwrap(), original);
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}

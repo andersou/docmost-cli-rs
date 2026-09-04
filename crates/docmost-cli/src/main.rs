@@ -2,6 +2,7 @@ mod content;
 mod links;
 mod position;
 mod session;
+mod update;
 
 use std::{
     fs,
@@ -58,6 +59,17 @@ enum Command {
     Search(SearchArgs),
     /// The current user
     User(UserCommand),
+    /// Replace this binary with the latest GitHub release
+    SelfUpdate(SelfUpdateArgs),
+}
+#[derive(Args)]
+struct SelfUpdateArgs {
+    /// Only report whether a newer release exists
+    #[arg(long)]
+    check: bool,
+    /// Reinstall even when the running version is already the latest
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Args)]
@@ -564,6 +576,8 @@ enum UserAction {
 enum AppError {
     #[error("{0}")]
     Client(#[from] DocmostError),
+    #[error("{0}")]
+    Update(#[from] update::UpdateError),
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
@@ -1465,6 +1479,7 @@ async fn execute_authenticated(
         Command::User(user) => match &user.action {
             UserAction::Me => emit(output, &client.users().me::<Value>().await?),
         },
+        Command::SelfUpdate(_) => unreachable!(),
     }
 }
 
@@ -1730,8 +1745,69 @@ async fn logout(cli: &Cli, path: &PathBuf, config: &mut Config, url: &str) -> Re
     )
 }
 
+async fn self_update(output: Output, args: &SelfUpdateArgs) -> Result<(), AppError> {
+    let current = semver::Version::parse(update::CURRENT_VERSION)
+        .map_err(|e| AppError::Failed(format!("invalid build version: {e}")))?;
+    let http = update::http_client()?;
+    let release = update::latest_release(&http).await?;
+    let latest = release.version()?;
+    let newer = latest > current;
+    if args.check {
+        return emit(
+            output,
+            &json!({
+                "current": current.to_string(),
+                "latest": latest.to_string(),
+                "update_available": newer,
+                "release": release.html_url,
+            }),
+        );
+    }
+    if !newer && !args.force {
+        return emit(
+            output,
+            &json!({
+                "current": current.to_string(),
+                "latest": latest.to_string(),
+                "updated": false,
+                "release": release.html_url,
+            }),
+        );
+    }
+    let (archive, ext) = update::archive_name(&latest, update::TARGET);
+    let asset = release
+        .asset(&archive)
+        .ok_or_else(|| update::UpdateError::NoAsset {
+            tag: release.tag_name.clone(),
+            target: update::TARGET.into(),
+        })?;
+    let sums = release
+        .asset("SHA256SUMS")
+        .ok_or_else(|| update::UpdateError::NoChecksums {
+            tag: release.tag_name.clone(),
+        })?;
+    let bytes = update::download(&http, &asset.browser_download_url).await?;
+    let sums = update::download(&http, &sums.browser_download_url).await?;
+    update::verify_checksum(&String::from_utf8_lossy(&sums), &archive, &bytes)?;
+    let binary = update::extract_binary(&bytes, ext, &update::binary_file_name(update::TARGET))?;
+    let path = update::install(&binary)?;
+    emit(
+        output,
+        &json!({
+            "current": current.to_string(),
+            "latest": latest.to_string(),
+            "updated": true,
+            "path": path,
+            "release": release.html_url,
+        }),
+    )
+}
+
 async fn run(cli: Cli) -> Result<(), AppError> {
     validate(&cli.command)?;
+    if let Command::SelfUpdate(args) = &cli.command {
+        return self_update(cli.output, args).await;
+    }
     let path = config_path()?;
     let mut config = load_config(&path)?;
     let api_overridden = cli.api_url.is_some() || std::env::var_os("DOCMOST_API_URL").is_some();

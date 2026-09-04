@@ -19,6 +19,8 @@ cargo build --release --package docmost-cli
 
 Binary: `target/release/docmost-cli`.
 
+If `docmost-cli` is on PATH but older than the latest release, `docmost-cli self-update --check` says so and `docmost-cli self-update` replaces the binary with the verified release archive; no login is needed.
+
 ## Server and authentication
 
 - There is no default server: pass `--api-url https://wiki.example.com` (with or without `/api`) or set `DOCMOST_API_URL`; after `auth login` the URL is remembered.
