@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "docmost-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "docmost-client"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "secrecy",
