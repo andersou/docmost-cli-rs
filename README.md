@@ -27,6 +27,15 @@ vfox use -p rust@1.98.0
 
 Download a precompiled archive from the [GitHub releases](https://github.com/andersou/docmost-cli-rs/releases) page and place the `docmost-cli` binary on your `PATH`. Each release ships archives for the four supported targets plus a `SHA256SUMS` file for verification.
 
+### Agent skill
+
+From a local checkout, install the global skill for supported coding agents:
+
+```sh
+npx skills add . --global --skill docmost-cli --yes
+```
+
+
 To build from source instead:
 
 ```sh
