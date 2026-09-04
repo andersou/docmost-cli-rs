@@ -192,6 +192,10 @@ prek run cargo-test --hook-stage pre-push --all-files
 
 Content is written through REST only. Docmost applies the change through its own collaboration server, so open editors see it live and the stored document stays consistent. Inline comments are created without the editor highlight the MCP added over WebSocket.
 
+## Roadmap
+
+[ROADMAP.md](ROADMAP.md) lists the rest of the Docmost API surface (spaces and groups administration, labels, favorites, notifications, public shares, sessions, zip imports), what is enterprise-only, and CLI improvements under consideration.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
