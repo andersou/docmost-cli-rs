@@ -203,15 +203,13 @@ mod tests {
 
     #[test]
     fn resolves_relative_and_absolute_targets() {
-        let base = Path::new("/tmp/base");
+        let base = std::env::temp_dir().join("base");
         assert_eq!(
-            resolve_local(base, "img/a%20b.png"),
-            PathBuf::from("/tmp/base/img/a b.png")
+            resolve_local(&base, "img/a%20b.png"),
+            base.join("img").join("a b.png")
         );
-        assert_eq!(
-            resolve_local(base, "/abs/x.png"),
-            PathBuf::from("/abs/x.png")
-        );
+        let absolute = std::env::temp_dir().join("x.png");
+        assert_eq!(resolve_local(&base, absolute.to_str().unwrap()), absolute);
     }
 
     #[test]
