@@ -45,8 +45,8 @@ npx skills add https://github.com/andersou/docmost-cli-rs --global --skill docmo
 Later, let the binary update itself from the latest release (the archive for your platform is verified against the release's `SHA256SUMS` before it replaces the current executable):
 
 ```sh
-docmost-cli self-update --check    # only report whether a newer release exists
-docmost-cli self-update            # download, verify, and replace the running binary
+docmost-cli update --check    # only report whether a newer release exists
+docmost-cli update            # download, verify, and replace the running binary
 ```
 
 To build from source instead:
@@ -118,7 +118,7 @@ Every command accepts `--output human` (default) or `--output json`; both print 
 
 Pages accept either their UUID or the `slugId` that ends a page URL (`/s/<space-slug>/p/<title-slug>-<slugId>`); spaces accept their UUID or slug. `page url <ID>` prints the link to a page exactly as the web app builds it, from the configured server. Lists paginate by cursor: `--limit`, `--cursor <meta.nextCursor>`, `--query`, or `--all` to follow every cursor.
 
-`self-update` needs no login and reads an optional `GITHUB_TOKEN` to raise GitHub's API rate limit.
+`update` needs no login and reads an optional `GITHUB_TOKEN` to raise GitHub's API rate limit.
 
 ### Exit codes
 

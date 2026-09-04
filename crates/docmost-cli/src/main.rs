@@ -60,10 +60,11 @@ enum Command {
     /// The current user
     User(UserCommand),
     /// Replace this binary with the latest GitHub release
-    SelfUpdate(SelfUpdateArgs),
+    #[command(alias = "self-update")]
+    Update(UpdateArgs),
 }
 #[derive(Args)]
-struct SelfUpdateArgs {
+struct UpdateArgs {
     /// Only report whether a newer release exists
     #[arg(long)]
     check: bool,
@@ -1479,7 +1480,7 @@ async fn execute_authenticated(
         Command::User(user) => match &user.action {
             UserAction::Me => emit(output, &client.users().me::<Value>().await?),
         },
-        Command::SelfUpdate(_) => unreachable!(),
+        Command::Update(_) => unreachable!(),
     }
 }
 
@@ -1745,7 +1746,7 @@ async fn logout(cli: &Cli, path: &PathBuf, config: &mut Config, url: &str) -> Re
     )
 }
 
-async fn self_update(output: Output, args: &SelfUpdateArgs) -> Result<(), AppError> {
+async fn update_binary(output: Output, args: &UpdateArgs) -> Result<(), AppError> {
     let current = semver::Version::parse(update::CURRENT_VERSION)
         .map_err(|e| AppError::Failed(format!("invalid build version: {e}")))?;
     let http = update::http_client()?;
@@ -1805,8 +1806,8 @@ async fn self_update(output: Output, args: &SelfUpdateArgs) -> Result<(), AppErr
 
 async fn run(cli: Cli) -> Result<(), AppError> {
     validate(&cli.command)?;
-    if let Command::SelfUpdate(args) = &cli.command {
-        return self_update(cli.output, args).await;
+    if let Command::Update(args) = &cli.command {
+        return update_binary(cli.output, args).await;
     }
     let path = config_path()?;
     let mut config = load_config(&path)?;

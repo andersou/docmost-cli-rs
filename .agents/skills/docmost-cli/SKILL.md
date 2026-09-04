@@ -19,7 +19,7 @@ cargo build --release --package docmost-cli
 
 Binary: `target/release/docmost-cli`.
 
-If `docmost-cli` is on PATH but older than the latest release, `docmost-cli self-update --check` says so and `docmost-cli self-update` replaces the binary with the verified release archive; no login is needed.
+If `docmost-cli` is on PATH but older than the latest release, `docmost-cli update --check` says so and `docmost-cli update` replaces the binary with the verified release archive; no login is needed.
 
 ## Server and authentication
 

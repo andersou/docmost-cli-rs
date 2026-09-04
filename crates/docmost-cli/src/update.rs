@@ -1,4 +1,4 @@
-//! `self-update`: compares the running version with the latest GitHub
+//! `update`: compares the running version with the latest GitHub
 //! release, downloads the archive built for this platform, verifies it
 //! against the release's `SHA256SUMS`, and swaps the current executable.
 

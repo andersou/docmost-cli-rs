@@ -1,5 +1,5 @@
 fn main() {
-    // Exposes the target triple so `self-update` can pick the matching
+    // Exposes the target triple so `update` can pick the matching
     // release archive (the names follow the CI packaging step).
     println!(
         "cargo:rustc-env=TARGET={}",

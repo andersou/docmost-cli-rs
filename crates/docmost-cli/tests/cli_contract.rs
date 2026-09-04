@@ -1241,10 +1241,10 @@ fn binary_copy(directory: &std::path::Path) -> std::path::PathBuf {
     copy
 }
 
-fn self_update(binary: &std::path::Path, server: &MockServer, args: &[&str]) -> Command {
+fn update_command(binary: &std::path::Path, server: &MockServer, args: &[&str]) -> Command {
     let mut command = Command::new(binary);
     command
-        .args(["--output", "json", "self-update"])
+        .args(["--output", "json", "update"])
         .args(args)
         .env("DOCMOST_CLI_RELEASES_API", server.uri())
         .env_remove("GITHUB_TOKEN");
@@ -1252,7 +1252,7 @@ fn self_update(binary: &std::path::Path, server: &MockServer, args: &[&str]) -> 
 }
 
 #[tokio::test]
-async fn self_update_replaces_the_binary_after_verifying_the_checksum() {
+async fn update_replaces_the_binary_after_verifying_the_checksum() {
     let server = MockServer::start().await;
     let payload = b"#!/bin/sh\necho updated\n".to_vec();
     let (archive_name, archive) = release_archive(&payload);
@@ -1261,7 +1261,7 @@ async fn self_update_replaces_the_binary_after_verifying_the_checksum() {
     let directory = tempdir().unwrap();
     let binary = binary_copy(directory.path());
 
-    self_update(&binary, &server, &["--check"])
+    update_command(&binary, &server, &["--check"])
         .assert()
         .success()
         .stdout(contains("\"update_available\": true"))
@@ -1272,7 +1272,7 @@ async fn self_update_replaces_the_binary_after_verifying_the_checksum() {
         "--check must not install"
     );
 
-    self_update(&binary, &server, &[])
+    update_command(&binary, &server, &[])
         .assert()
         .success()
         .stdout(contains("\"updated\": true"));
@@ -1288,7 +1288,7 @@ async fn self_update_replaces_the_binary_after_verifying_the_checksum() {
 }
 
 #[tokio::test]
-async fn self_update_refuses_archives_that_fail_the_checksum() {
+async fn update_refuses_archives_that_fail_the_checksum() {
     let server = MockServer::start().await;
     let (archive_name, archive) = release_archive(b"tampered");
     let sums = format!("{}  {archive_name}\n", "0".repeat(64));
@@ -1297,7 +1297,7 @@ async fn self_update_refuses_archives_that_fail_the_checksum() {
     let binary = binary_copy(directory.path());
     let original = fs::read(&binary).unwrap();
 
-    self_update(&binary, &server, &[])
+    update_command(&binary, &server, &[])
         .assert()
         .code(5)
         .stderr(contains("checksum mismatch"));
@@ -1305,7 +1305,7 @@ async fn self_update_refuses_archives_that_fail_the_checksum() {
 }
 
 #[tokio::test]
-async fn self_update_reports_when_already_current_without_downloading() {
+async fn update_reports_when_already_current_without_downloading() {
     let server = MockServer::start().await;
     let (archive_name, archive) = release_archive(b"same");
     let sums = format!("{}  {archive_name}\n", sha256_hex(&archive));
@@ -1315,7 +1315,7 @@ async fn self_update_reports_when_already_current_without_downloading() {
     let binary = binary_copy(directory.path());
     let original = fs::read(&binary).unwrap();
 
-    self_update(&binary, &server, &[])
+    update_command(&binary, &server, &[])
         .assert()
         .success()
         .stdout(contains("\"updated\": false"));
