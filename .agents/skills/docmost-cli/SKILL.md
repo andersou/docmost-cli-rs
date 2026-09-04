@@ -60,16 +60,18 @@ docmost-cli search "release checklist" --space <SPACE_ID>   # full-text; --title
 
 ## Links to pages
 
-Never build page links yourself: the host, the space slug, and the segment order are all easy to get wrong. Every page object printed by `page get`, `page url`, `page create`, `page edit`, `page duplicate`, `page import`, `page tree`, `page list`, `page trash`, `page breadcrumbs`, `page backlinks`, and `search` carries a ready-made `url` field (`<server>/s/<space-slug>/p/<title-slug>-<slugId>`), built from the server URL saved by `auth login` (shown as `api_url` in `auth status`). When only the link is needed:
+Never build page links yourself: the host, the space slug, and the segment order are all easy to get wrong. Ask the CLI instead; it builds the link exactly like the web app (`<server>/s/<space-slug>/p/<title-slug>-<slugId>`) from the server URL saved by `auth login` (shown as `api_url` in `auth status`):
 
 ```sh
-docmost-cli page url <PAGE_ID> --output json | jq -r .url
+docmost-cli page url <PAGE_ID_OR_SLUG_ID> --output json | jq -r .url
 ```
+
+Do this for every page you report to the user, including pages you just created (`page create` prints the `id`).
 
 ## Reading pages
 
 ```sh
-docmost-cli page get <PAGE_ID>                    # metadata + "url" + "content" as markdown (default)
+docmost-cli page get <PAGE_ID>                    # metadata + "content" as markdown (default)
 docmost-cli page get <PAGE_ID> --content html     # or json (ProseMirror), or none
 docmost-cli page get <PAGE_ID> --include-space
 docmost-cli page export <PAGE_ID> --format markdown > page.md
@@ -145,5 +147,6 @@ docmost-cli user me
 ```sh
 docmost-cli page tree --space <SPACE_ID> --recursive --output json | jq '.items[] | {id, slugId, title, depth}'
 docmost-cli page get <PAGE_ID> --output json | jq -r .content > page.md
-docmost-cli page create --space <SPACE_ID> --title "Report" --content-file report.md --output json | jq -r '.id, .url'
+docmost-cli page create --space <SPACE_ID> --title "Report" --content-file report.md --output json | jq -r .id
+docmost-cli page url <PAGE_ID> --output json | jq -r .url
 ```
