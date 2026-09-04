@@ -94,7 +94,8 @@ docmost-cli --help
 docmost-cli auth status                                   # identity, server version, config location
 docmost-cli space list --all
 docmost-cli page tree --space <SPACE_ID> --recursive
-docmost-cli page get <PAGE_ID_OR_SLUG_ID>                 # metadata plus markdown content
+docmost-cli page get <PAGE_ID_OR_SLUG_ID>                 # metadata, url, and markdown content
+docmost-cli page url <PAGE_ID>                            # just the web link
 docmost-cli page create --space <SPACE_ID> --title "Runbook" --content-file runbook.md --upload-local-files
 docmost-cli page edit <PAGE_ID> --content-file - --operation append < notes.md
 docmost-cli page move <PAGE_ID> --parent <PARENT_ID>       # default: last among the new siblings
@@ -108,7 +109,7 @@ docmost-cli search "deployment checklist" --space <SPACE_ID>
 
 Every command accepts `--output human` (default) or `--output json`; both print pretty JSON today. Success output is written to stdout; errors are written to stderr with a nonzero exit status. `page export` and `attachment download` write raw file bytes to stdout unless `--out` is given.
 
-Pages accept either their UUID or the `slugId` from the page URL (`/s/<space>/p/<slugId>-<title>`); spaces accept their UUID or slug. Lists paginate by cursor: `--limit`, `--cursor <meta.nextCursor>`, `--query`, or `--all` to follow every cursor.
+Pages accept either their UUID or the `slugId` that ends a page URL (`/s/<space-slug>/p/<title-slug>-<slugId>`); spaces accept their UUID or slug. Every page object in the output carries a ready-made `url` built from the configured server, and `page url <ID>` prints just that link. Lists paginate by cursor: `--limit`, `--cursor <meta.nextCursor>`, `--query`, or `--all` to follow every cursor.
 
 ### Exit codes
 

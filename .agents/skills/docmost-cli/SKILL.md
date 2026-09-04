@@ -45,7 +45,7 @@ docmost-cli auth logout                                            # revoke the 
 
 ## IDs and pagination
 
-- Commands take UUIDs. Pages also accept the `slugId` from a page URL (`https://wiki/s/<space>/p/<slugId>-<title>`), and spaces accept their slug.
+- Commands take UUIDs. Pages also accept the `slugId`, the last `-`-separated segment of a page URL (`https://<host>/s/<space-slug>/p/<title-slug>-<slugId>`), and spaces accept their slug.
 - Lists paginate by cursor: `--limit N` (1-100), `--cursor <meta.nextCursor>`, `--query TEXT`, or `--all` to follow every cursor. JSON output is `{"items": [...], "meta": {...}}`.
 - Find the space first, then navigate pages:
 
@@ -58,10 +58,18 @@ docmost-cli page list --space <SPACE_ID> --all              # recently updated p
 docmost-cli search "release checklist" --space <SPACE_ID>   # full-text; --title-only, --limit, --offset
 ```
 
+## Links to pages
+
+Never build page links yourself: the host, the space slug, and the segment order are all easy to get wrong. Every page object printed by `page get`, `page url`, `page create`, `page edit`, `page duplicate`, `page import`, `page tree`, `page list`, `page trash`, `page breadcrumbs`, `page backlinks`, and `search` carries a ready-made `url` field (`<server>/s/<space-slug>/p/<title-slug>-<slugId>`), built from the server URL saved by `auth login` (shown as `api_url` in `auth status`). When only the link is needed:
+
+```sh
+docmost-cli page url <PAGE_ID> --output json | jq -r .url
+```
+
 ## Reading pages
 
 ```sh
-docmost-cli page get <PAGE_ID>                    # metadata + "content" as markdown (default)
+docmost-cli page get <PAGE_ID>                    # metadata + "url" + "content" as markdown (default)
 docmost-cli page get <PAGE_ID> --content html     # or json (ProseMirror), or none
 docmost-cli page get <PAGE_ID> --include-space
 docmost-cli page export <PAGE_ID> --format markdown > page.md
@@ -137,5 +145,5 @@ docmost-cli user me
 ```sh
 docmost-cli page tree --space <SPACE_ID> --recursive --output json | jq '.items[] | {id, slugId, title, depth}'
 docmost-cli page get <PAGE_ID> --output json | jq -r .content > page.md
-docmost-cli page create --space <SPACE_ID> --title "Report" --content-file report.md --output json | jq -r .id
+docmost-cli page create --space <SPACE_ID> --title "Report" --content-file report.md --output json | jq -r '.id, .url'
 ```

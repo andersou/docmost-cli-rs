@@ -967,40 +967,53 @@ async fn page_tree_recursive_walks_children_with_depth() {
 }
 
 #[tokio::test]
-async fn page_get_can_omit_content_and_choose_format() {
+async fn page_get_builds_the_link_and_can_omit_content_or_space() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/pages/info"))
-        .and(body_json(json!({"pageId": "slug-1", "includeContent": true, "includeSpace": false, "format": "markdown"})))
-        .respond_with(envelope(json!({"id": "page-1", "content": "# Page"})))
-        .expect(2)
+        .and(body_json(json!({"pageId": "slug-1", "includeContent": true, "includeSpace": true, "format": "markdown"})))
+        .respond_with(envelope(json!({
+            "id": "page-1", "slugId": "sZ6xIJ2hMh", "title": "Plano de Teste — Migração",
+            "content": "# Page", "space": {"id": "space-1", "slug": "general"}
+        })))
+        .expect(1)
         .mount(&server)
         .await;
-    let directory = tempdir().unwrap();
-    let config = authenticated_config(directory.path(), &server);
-
-    docmost(&config, &["page", "get", "slug-1"])
-        .assert()
-        .success()
-        .stdout(contains("\"content\": \"# Page\""));
-    let output = docmost(&config, &["page", "get", "slug-1", "--content", "markdown"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    assert!(String::from_utf8(output).unwrap().contains("# Page"));
     Mock::given(method("POST"))
         .and(path("/api/pages/info"))
         .and(body_json(
             json!({"pageId": "slug-1", "includeContent": true, "includeSpace": true}),
         ))
-        .respond_with(envelope(
-            json!({"id": "page-1", "content": {"type": "doc"}}),
-        ))
+        .respond_with(envelope(json!({
+            "id": "page-1", "slugId": "sZ6xIJ2hMh", "title": "T",
+            "content": {"type": "doc"}, "space": {"id": "space-1", "slug": "general"}
+        })))
         .expect(1)
         .mount(&server)
         .await;
+    let directory = tempdir().unwrap();
+    let config = authenticated_config(directory.path(), &server);
+
+    let output = docmost(&config, &["page", "get", "slug-1"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(value["content"], "# Page");
+    assert_eq!(
+        value["url"],
+        format!(
+            "{}/s/general/p/plano-de-teste-migracao-sZ6xIJ2hMh",
+            server.uri()
+        )
+    );
+    assert!(
+        value.get("space").is_none(),
+        "space is only included on request"
+    );
+
     let output = docmost(
         &config,
         &[
@@ -1019,6 +1032,86 @@ async fn page_get_can_omit_content_and_choose_format() {
     .clone();
     let value: Value = serde_json::from_slice(&output).unwrap();
     assert!(value.get("content").is_none());
+    assert_eq!(value["space"]["slug"], "general");
+    assert_eq!(
+        value["url"],
+        format!("{}/s/general/p/t-sZ6xIJ2hMh", server.uri())
+    );
+    // No spaces/info lookup is needed when the page embeds its space.
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn page_url_and_lists_resolve_the_space_slug_once() {
+    let server = MockServer::start().await;
+    let meta = json!({"limit": 20, "hasNextPage": false, "hasPrevPage": false, "nextCursor": null, "prevCursor": null});
+    Mock::given(method("POST"))
+        .and(path("/api/pages/sidebar-pages"))
+        .and(body_json(json!({"spaceId": "space-1"})))
+        .respond_with(envelope(json!({
+            "items": [
+                {"id": "p1", "slugId": "aaaaaaaaaa", "title": "First page", "spaceId": "space-1"},
+                {"id": "p2", "slugId": "bbbbbbbbbb", "title": "", "spaceId": "space-1"},
+            ],
+            "meta": meta,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/spaces/info"))
+        .and(body_json(json!({"spaceId": "space-1"})))
+        .respond_with(envelope(
+            json!({"id": "space-1", "slug": "docs", "name": "Docs"}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/pages/info"))
+        .and(body_json(
+            json!({"pageId": "aaaaaaaaaa", "includeContent": true, "includeSpace": true}),
+        ))
+        .respond_with(envelope(json!({
+            "id": "p1", "slugId": "aaaaaaaaaa", "title": "First page",
+            "content": {"type": "doc"}, "space": {"id": "space-1", "slug": "docs"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let directory = tempdir().unwrap();
+    let config = authenticated_config(directory.path(), &server);
+
+    let output = docmost(&config, &["page", "tree", "--space", "space-1"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: Value = serde_json::from_slice(&output).unwrap();
+    let urls: Vec<&str> = value["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["url"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            format!("{}/s/docs/p/first-page-aaaaaaaaaa", server.uri()),
+            format!("{}/s/docs/p/untitled-bbbbbbbbbb", server.uri()),
+        ]
+    );
+
+    docmost(&config, &["page", "url", "aaaaaaaaaa"])
+        .assert()
+        .success()
+        .stdout(contains(format!(
+            "\"url\": \"{}/s/docs/p/first-page-aaaaaaaaaa\"",
+            server.uri()
+        )))
+        .stdout(contains("\"spaceSlug\": \"docs\""));
     server.verify().await;
 }
 

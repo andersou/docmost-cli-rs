@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+deunicode.workspace = true
 directories.workspace = true
 docmost-client = { path = "../docmost-client" }
 keyring.workspace = true

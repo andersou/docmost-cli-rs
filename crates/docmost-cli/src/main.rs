@@ -1,8 +1,10 @@
 mod content;
+mod links;
 mod position;
 mod session;
 
 use std::{
+    collections::HashMap,
     fs,
     io::{self, IsTerminal, Read, Write},
     path::{Path, PathBuf},
@@ -189,6 +191,8 @@ enum PageAction {
     Tree(PageTreeArgs),
     /// Page by ID or slug ID, with its content
     Get(PageGetArgs),
+    /// Link to a page in the web app
+    Url(IdArgs),
     /// Create a page, optionally with markdown, HTML, or JSON content
     Create(PageCreateArgs),
     /// Change the title, icon, or content of a page
@@ -768,6 +772,96 @@ fn content_value(text: &str, format: ContentFormat) -> Result<Value, AppError> {
     })
 }
 
+/// Caches space slugs so lists resolve each space at most once.
+#[derive(Default)]
+struct SpaceSlugs {
+    cache: HashMap<String, Option<String>>,
+}
+impl SpaceSlugs {
+    async fn slug(&mut self, client: &DocmostClient, space_id: &str) -> Option<String> {
+        if let Some(slug) = self.cache.get(space_id) {
+            return slug.clone();
+        }
+        let slug = client
+            .spaces()
+            .info::<Value>(space_id)
+            .await
+            .ok()
+            .and_then(|space| space["slug"].as_str().map(str::to_owned));
+        self.cache.insert(space_id.to_owned(), slug.clone());
+        slug
+    }
+}
+
+/// Adds a `url` field to every page-like object (anything carrying a
+/// `slugId`) inside `value`, so callers never have to build links by hand.
+/// The space slug comes from an embedded `space` object or is looked up by
+/// `spaceId`; page bodies are not traversed.
+async fn add_urls(client: &DocmostClient, slugs: &mut SpaceSlugs, value: &mut Value) {
+    let app_url = client.app_url();
+    let mut stack = vec![value];
+    while let Some(current) = stack.pop() {
+        match current {
+            Value::Array(items) => stack.extend(items.iter_mut()),
+            Value::Object(object) => {
+                let slug_id = object
+                    .get("slugId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                if let Some(slug_id) = slug_id {
+                    let embedded = object
+                        .get("space")
+                        .and_then(|space| space.get("slug"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    let space_slug = match embedded {
+                        Some(slug) => Some(slug),
+                        None => {
+                            let space_id = object
+                                .get("spaceId")
+                                .and_then(Value::as_str)
+                                .or_else(|| {
+                                    object
+                                        .get("space")
+                                        .and_then(|space| space.get("id"))
+                                        .and_then(Value::as_str)
+                                })
+                                .map(str::to_owned);
+                            match space_id {
+                                Some(id) => slugs.slug(client, &id).await,
+                                None => None,
+                            }
+                        }
+                    };
+                    if let Some(space_slug) = space_slug {
+                        let title = object.get("title").and_then(Value::as_str);
+                        let url = links::page_url(&app_url, &space_slug, &slug_id, title);
+                        object.insert("url".into(), Value::String(url));
+                    }
+                }
+                for (key, child) in object.iter_mut() {
+                    if !matches!(key.as_str(), "content" | "ydoc" | "textContent")
+                        && (child.is_array() || child.is_object())
+                    {
+                        stack.push(child);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn emit_pages(
+    client: &DocmostClient,
+    slugs: &mut SpaceSlugs,
+    output: Output,
+    mut value: Value,
+) -> Result<(), AppError> {
+    add_urls(client, slugs, &mut value).await;
+    emit(output, &value)
+}
+
 async fn upload_file(
     client: &DocmostClient,
     page_id: &str,
@@ -815,6 +909,7 @@ fn with_uploads(mut page: Value, uploads: Vec<Attachment>) -> Value {
 
 async fn create_page(
     client: &DocmostClient,
+    slugs: &mut SpaceSlugs,
     args: &PageCreateArgs,
     output: Output,
 ) -> Result<(), AppError> {
@@ -847,7 +942,7 @@ async fn create_page(
     }
     let created: Value = client.pages().create(&Value::Object(body)).await?;
     let Some(input) = deferred else {
-        return emit(output, &created);
+        return emit_pages(client, slugs, output, created).await;
     };
     // Attachments need the page ID, so the page is created first and the
     // content is written once the uploaded URLs are known.
@@ -865,11 +960,12 @@ async fn create_page(
             "format": format.as_str(),
         }))
         .await?;
-    emit(output, &with_uploads(updated, uploads))
+    emit_pages(client, slugs, output, with_uploads(updated, uploads)).await
 }
 
 async fn edit_page(
     client: &DocmostClient,
+    slugs: &mut SpaceSlugs,
     args: &PageEditArgs,
     output: Output,
 ) -> Result<(), AppError> {
@@ -908,7 +1004,7 @@ async fn edit_page(
     }
     body.insert("pageId".into(), json!(args.id));
     let updated: Value = client.pages().update(&Value::Object(body)).await?;
-    emit(output, &with_uploads(updated, uploads))
+    emit_pages(client, slugs, output, with_uploads(updated, uploads)).await
 }
 
 /// Siblings under `parent` (or the space root), sorted by position and
@@ -978,6 +1074,7 @@ async fn move_page(
 
 async fn page_tree(
     client: &DocmostClient,
+    slugs: &mut SpaceSlugs,
     args: &PageTreeArgs,
     output: Output,
 ) -> Result<(), AppError> {
@@ -989,7 +1086,7 @@ async fn page_tree(
         .sidebar::<Value>(space, parent, &page, args.list.all || args.recursive)
         .await?;
     if !args.recursive {
-        return emit(output, &first);
+        return emit_pages(client, slugs, output, serde_json::to_value(first)?).await;
     }
     let mut items = Vec::new();
     let mut queue: Vec<(Value, u32)> = first.items.into_iter().map(|item| (item, 0)).collect();
@@ -1013,11 +1110,12 @@ async fn page_tree(
             }
         }
     }
-    emit(output, &json!({"items": items}))
+    emit_pages(client, slugs, output, json!({"items": items})).await
 }
 
 async fn import_page(
     client: &DocmostClient,
+    slugs: &mut SpaceSlugs,
     args: &PageImportArgs,
     output: Output,
 ) -> Result<(), AppError> {
@@ -1057,7 +1155,7 @@ async fn import_page(
             object.insert("position".into(), json!(position));
         }
     }
-    emit(output, &page)
+    emit_pages(client, slugs, output, page).await
 }
 
 async fn attach(
@@ -1149,6 +1247,7 @@ async fn execute_authenticated(
     command: &Command,
     output: Output,
 ) -> Result<(), AppError> {
+    let mut slugs = SpaceSlugs::default();
     match command {
         Command::Auth(AuthCommand {
             action: AuthAction::Status,
@@ -1225,37 +1324,57 @@ async fn execute_authenticated(
             ),
         },
         Command::Page(page) => match &page.action {
-            PageAction::List(args) => emit(
-                output,
-                &client
+            PageAction::List(args) => {
+                let pages = client
                     .pages()
                     .recent::<Value>(
                         args.space.as_deref(),
                         &page_request(&args.list)?,
                         args.list.all,
                     )
-                    .await?,
-            ),
-            PageAction::Tree(args) => page_tree(client, args, output).await,
+                    .await?;
+                emit_pages(client, &mut slugs, output, serde_json::to_value(pages)?).await
+            }
+            PageAction::Tree(args) => page_tree(client, &mut slugs, args, output).await,
             PageAction::Get(args) => {
                 let format = match args.content {
                     ContentChoice::Markdown => Some(ContentFormat::Markdown),
                     ContentChoice::Html => Some(ContentFormat::Html),
                     ContentChoice::Json | ContentChoice::None => None,
                 };
-                let mut page: Value = client
-                    .pages()
-                    .info(&args.id, format, args.include_space)
-                    .await?;
-                if matches!(args.content, ContentChoice::None)
-                    && let Some(object) = page.as_object_mut()
-                {
-                    object.remove("content");
+                // The space is always fetched so the link can be built;
+                // it stays in the output only when asked for.
+                let mut page: Value = client.pages().info(&args.id, format, true).await?;
+                add_urls(client, &mut slugs, &mut page).await;
+                if let Some(object) = page.as_object_mut() {
+                    if !args.include_space {
+                        object.remove("space");
+                    }
+                    if matches!(args.content, ContentChoice::None) {
+                        object.remove("content");
+                    }
                 }
                 emit(output, &page)
             }
-            PageAction::Create(args) => create_page(client, args, output).await,
-            PageAction::Edit(args) => edit_page(client, args, output).await,
+            PageAction::Url(args) => {
+                let mut page: Value = client.pages().info(&args.id, None, true).await?;
+                add_urls(client, &mut slugs, &mut page).await;
+                let url = page["url"].as_str().ok_or_else(|| {
+                    AppError::Failed("unable to build the page link: no space slug".into())
+                })?;
+                emit(
+                    output,
+                    &json!({
+                        "id": page["id"],
+                        "slugId": page["slugId"],
+                        "title": page["title"],
+                        "spaceSlug": page["space"]["slug"],
+                        "url": url,
+                    }),
+                )
+            }
+            PageAction::Create(args) => create_page(client, &mut slugs, args, output).await,
+            PageAction::Edit(args) => edit_page(client, &mut slugs, args, output).await,
             PageAction::Move(args) => move_page(client, args, output).await,
             PageAction::MoveToSpace(args) => emit(
                 output,
@@ -1264,25 +1383,25 @@ async fn execute_authenticated(
                     .move_to_space::<Value>(&args.id, &args.space)
                     .await?,
             ),
-            PageAction::Duplicate(args) => emit(
-                output,
-                &client
+            PageAction::Duplicate(args) => {
+                let page = client
                     .pages()
                     .duplicate::<Value>(&args.id, args.space.as_deref())
-                    .await?,
-            ),
+                    .await?;
+                emit_pages(client, &mut slugs, output, page).await
+            }
             PageAction::Delete(args) => delete_pages(client, args, output).await,
             PageAction::Restore(args) => {
                 client.pages().restore(&args.id).await?;
                 emit(output, &json!({"restored": true, "id": args.id}))
             }
-            PageAction::Trash(args) => emit(
-                output,
-                &client
+            PageAction::Trash(args) => {
+                let pages = client
                     .pages()
                     .trash::<Value>(&args.space, &page_request(&args.list)?, args.list.all)
-                    .await?,
-            ),
+                    .await?;
+                emit_pages(client, &mut slugs, output, serde_json::to_value(pages)?).await
+            }
             PageAction::History(args) => emit(
                 output,
                 &client
@@ -1294,27 +1413,25 @@ async fn execute_authenticated(
                 output,
                 &client.pages().history_info::<Value>(&args.id).await?,
             ),
-            PageAction::Breadcrumbs(args) => emit(
-                output,
-                &client.pages().breadcrumbs::<Value>(&args.id).await?,
-            ),
+            PageAction::Breadcrumbs(args) => {
+                let crumbs = client.pages().breadcrumbs::<Value>(&args.id).await?;
+                emit_pages(client, &mut slugs, output, crumbs).await
+            }
             PageAction::Backlinks(args) => {
                 let direction = match args.direction {
                     Direction::Incoming => "incoming",
                     Direction::Outgoing => "outgoing",
                 };
-                emit(
-                    output,
-                    &client
-                        .pages()
-                        .backlinks::<Value>(
-                            &args.id,
-                            direction,
-                            &page_request(&args.list)?,
-                            args.list.all,
-                        )
-                        .await?,
-                )
+                let pages = client
+                    .pages()
+                    .backlinks::<Value>(
+                        &args.id,
+                        direction,
+                        &page_request(&args.list)?,
+                        args.list.all,
+                    )
+                    .await?;
+                emit_pages(client, &mut slugs, output, serde_json::to_value(pages)?).await
             }
             PageAction::Export(args) => {
                 let download = client
@@ -1328,7 +1445,7 @@ async fn execute_authenticated(
                     .await?;
                 deliver(output, &download, &args.out)
             }
-            PageAction::Import(args) => import_page(client, args, output).await,
+            PageAction::Import(args) => import_page(client, &mut slugs, args, output).await,
             PageAction::Attachments(args) => emit(
                 output,
                 &client
@@ -1415,7 +1532,8 @@ async fn execute_authenticated(
             if !args.label.is_empty() {
                 body["labelIds"] = json!(args.label);
             }
-            emit(output, &client.search().search::<Value, _>(&body).await?)
+            let results = client.search().search::<Value, _>(&body).await?;
+            emit_pages(client, &mut slugs, output, results).await
         }
         Command::User(user) => match &user.action {
             UserAction::Me => emit(output, &client.users().me::<Value>().await?),

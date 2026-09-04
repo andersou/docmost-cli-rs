@@ -208,6 +208,16 @@ impl DocmostClient {
     pub fn api_url(&self) -> &Url {
         &self.base
     }
+    /// The web application origin, i.e. the API URL without its `/api/`
+    /// suffix and without a trailing slash. Docmost serves the client and
+    /// the API from the same origin.
+    pub fn app_url(&self) -> String {
+        let mut url = self.base.clone();
+        let path = self.base.path().trim_end_matches('/');
+        let path = path.strip_suffix("/api").unwrap_or(path);
+        url.set_path(path);
+        url.to_string().trim_end_matches('/').to_owned()
+    }
     pub fn auth(&self) -> AuthService<'_> {
         AuthService(self)
     }
