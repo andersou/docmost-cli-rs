@@ -804,8 +804,11 @@ async fn page_export_streams_text_and_requires_out_for_archives() {
         .and(body_json(json!({"pageId": "page-1", "format": "markdown", "includeChildren": false, "includeAttachments": false})))
         .respond_with(
             ResponseTemplate::new(200)
-                .insert_header("content-type", "text/markdown")
-                .insert_header("content-disposition", "attachment; filename=\"Page.md\"")
+                .insert_header("content-type", "application/octet-stream")
+                .insert_header(
+                    "content-disposition",
+                    "attachment; filename=\"My%20Page.md\"",
+                )
                 .set_body_bytes(b"# Page\n".to_vec()),
         )
         .mount(&server)

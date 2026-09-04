@@ -15,6 +15,7 @@ Rust CLI and reusable async client for the [Docmost](https://docmost.com) wiki A
 
 - A Docmost server at **v0.70.0 or newer**. Page content is written through `pages/create` and `pages/update`, which learned the `content`, `format`, and `operation` fields in that release; older servers silently drop those fields and create empty pages. `docmost-cli auth status` prints the server version.
 - Community edition is enough. API keys, OAuth, and MFA are enterprise features and are not used; accounts that require MFA cannot log in through the API.
+- `page attachments` (listing the files of a page) needs a server newer than v0.95.0; every other command works on v0.70.0 and later.
 - Rust 1.98.0 or newer to build from source. Install it however you prefer: [rustup](https://rustup.rs/) or any other toolchain manager works. If you use [vfox](https://vfox.lhan.me/), the repository ships a `.vfox.toml` and the command below selects the pinned toolchain, but vfox is only a suggestion, not a requirement.
 
 ```sh
@@ -131,6 +132,20 @@ npm run release:dry-run -- --no-ci
 ```
 
 Publishing is CI-only and requires `EXPECTED_VERSION`.
+
+## Local smoke test
+
+`scripts/docmost-smoke-compose.yml` starts a throwaway Docmost (with PostgreSQL and Redis) on port 3300 for end-to-end checks:
+
+```sh
+docker compose -f scripts/docmost-smoke-compose.yml -p docmost-smoke up -d
+curl -sS -X POST http://localhost:3300/api/auth/setup -H 'content-type: application/json' \
+  -d '{"workspaceName":"Smoke","name":"Ada","email":"ada@smoke.test","password":"smoke-pass-123"}' >/dev/null
+export DOCMOST_CONFIG=/tmp/docmost-smoke.json
+printf '%s' smoke-pass-123 | docmost-cli --api-url http://localhost:3300 auth login --email ada@smoke.test --password-stdin
+docmost-cli auth status
+docker compose -f scripts/docmost-smoke-compose.yml -p docmost-smoke down -v
+```
 
 ## Quality hooks
 

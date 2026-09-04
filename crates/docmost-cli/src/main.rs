@@ -701,11 +701,19 @@ fn deliver(output: Output, download: &Download, out: &Option<PathBuf>) -> Result
             )
         }
         None => {
-            let textual = download
+            // Exports arrive as application/octet-stream, so the file name
+            // decides whether the body is safe to print.
+            let textual_type = download
                 .content_type
                 .as_deref()
                 .is_some_and(|t| t.starts_with("text/") || t.contains("json"));
-            if !textual {
+            let textual_name = file_name.as_deref().is_some_and(|name| {
+                let lower = name.to_ascii_lowercase();
+                [".md", ".markdown", ".html", ".htm", ".txt", ".json"]
+                    .iter()
+                    .any(|ext| lower.ends_with(ext))
+            });
+            if !textual_type && !textual_name {
                 return Err(AppError::Usage(
                     "the server sent a binary file; pass --out <FILE> to save it".into(),
                 ));

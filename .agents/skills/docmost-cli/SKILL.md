@@ -69,7 +69,7 @@ docmost-cli page export <PAGE_ID> --format html --include-children --include-att
 docmost-cli page breadcrumbs <PAGE_ID>
 docmost-cli page backlinks <PAGE_ID> --direction incoming
 docmost-cli page history <PAGE_ID>; docmost-cli page history-get <HISTORY_ID>
-docmost-cli page attachments <PAGE_ID>
+docmost-cli page attachments <PAGE_ID>            # needs a server newer than v0.95.0
 ```
 
 ## Writing pages
