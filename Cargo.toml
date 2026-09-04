@@ -1,0 +1,28 @@
+[workspace]
+members = ["crates/docmost-client", "crates/docmost-cli"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+
+[workspace.dependencies]
+assert_cmd = "2.0"
+clap = { version = "4.5", features = ["derive", "env"] }
+directories = "6.0"
+keyring = "4.2"
+mime_guess = "2.0"
+percent-encoding = "2.3"
+predicates = "3.1"
+regex = "1.11"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+rpassword = "7.4"
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.15"
+thiserror = "2.0"
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "fs", "io-std"] }
+url = "2.5"
+wiremock = "0.6"
