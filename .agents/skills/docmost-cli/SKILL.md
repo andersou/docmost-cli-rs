@@ -104,6 +104,8 @@ docmost-cli page restore <PAGE_ID>; docmost-cli page trash --space <SPACE_ID>
 docmost-cli page import --space <SPACE_ID> --file notes.docx --parent <PARENT_ID>   # .md .html .docx .pdf
 ```
 
+- **Use Markdown by default for every page create or full-body edit.** Omit `--format` (its default is `markdown`) and use `<status color="…">TEXT</status>` for badges. Markdown avoids sending hand-built ProseMirror JSON and is the preferred input for normal text, headings, lists, tables, code blocks, links, math, footnotes, and supported callouts.
+- Do not round-trip an existing page through JSON or HTML merely to edit ordinary content. Use `--format json` only when deliberately supplying ProseMirror-only nodes; use `--format html` only when an exact HTML preservation/repair is required. Markdown cannot faithfully represent every editor extension: nested callouts and raw HTML blocks are not reliable.
 - `--data '<json object>'` on `create`/`edit` merges arbitrary API fields; explicit flags win.
 - Markdown is converted by the server. Supported: headings, lists, task lists, tables, fenced code, `$math$`/`$$math$$`, footnotes, and callouts written as `:::info` … `:::` (types `info`, `success`, `warning`, `danger`; others become `info`). Status badges use the CLI shorthand `<status color="green">TEXT</status>` (colors gray, blue, green, yellow, red, purple). Nested callouts and raw HTML blocks are not reliable.
 - JSON bodies are limited to 1 MiB by the server; for very large documents use `page import`.
