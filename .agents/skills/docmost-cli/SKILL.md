@@ -134,6 +134,19 @@ Use this node in the containing paragraph's `content` array; preserve every othe
 
 Verify that the final JSON still has `"type":"mention"` with the intended `entityId`. A Markdown full-body replace flattens mentions back to `@Name` text.
 
+## Footnotes
+
+Use numbered Markdown references inline and define them below the body. The reference marker has no space before it:
+
+```md
+The printing industry adopted the text in [^1]1966.[^2]
+
+[^1]: Historical note.
+[^2]: Source or clarification.
+```
+
+Send this body with the default `--format markdown`. Docmost stores the references as `footnoteReference` nodes and the definitions in a trailing `footnotes` node; use Markdown rather than hand-building those linked JSON `data-id` attributes.
+
 ## Attachments
 
 ```sh
