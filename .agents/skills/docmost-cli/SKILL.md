@@ -104,12 +104,35 @@ docmost-cli page restore <PAGE_ID>; docmost-cli page trash --space <SPACE_ID>
 docmost-cli page import --space <SPACE_ID> --file notes.docx --parent <PARENT_ID>   # .md .html .docx .pdf
 ```
 
-- **Use Markdown by default for every page create or full-body edit.** Omit `--format` (its default is `markdown`) and use `<status color="…">TEXT</status>` for badges. Markdown avoids sending hand-built ProseMirror JSON and is the preferred input for normal text, headings, lists, tables, code blocks, links, math, footnotes, and supported callouts.
 - Do not round-trip an existing page through JSON or HTML merely to edit ordinary content. Use `--format json` only when deliberately supplying ProseMirror-only nodes; use `--format html` only when an exact HTML preservation/repair is required. Markdown cannot faithfully represent every editor extension: nested callouts and raw HTML blocks are not reliable.
-- **User mentions are a JSON-only exception.** Markdown renders a stored mention as `@Name`, but sending that Markdown back creates plain text, not a mention or notification. To create or preserve a user mention, resolve the person first with `docmost-cli workspace members --all --output json`, then send the intentional ProseMirror node in a `--format json` document: `{"type":"mention","attrs":{"entityType":"user","entityId":"<USER_ID>","label":"<NAME>"}}`. Read the updated page as JSON and verify the `mention` node remains.
+- Mentions are ProseMirror-only nodes; see **User mentions** before editing a page that contains one.
 - `--data '<json object>'` on `create`/`edit` merges arbitrary API fields; explicit flags win.
 - Markdown is converted by the server. Supported: headings, lists, task lists, tables, fenced code, `$math$`/`$$math$$`, footnotes, and callouts written as `:::info` … `:::` (types `info`, `success`, `warning`, `danger`; others become `info`). Status badges use the CLI shorthand `<status color="green">TEXT</status>` (colors gray, blue, green, yellow, red, purple). Nested callouts and raw HTML blocks are not reliable.
 - JSON bodies are limited to 1 MiB by the server; for very large documents use `page import`.
+
+## User mentions
+
+Markdown renders a stored mention as `@Name`, but sending that Markdown back creates plain text, not a mention or notification. Create and preserve mentions through a complete `--format json` document instead:
+
+```sh
+# Resolve the target's stable user ID; do not use the displayed name as an ID.
+docmost-cli workspace members --all --output json | jq '.items[] | {id, name}'
+
+# Start from the current ProseMirror document, replace the intended text node
+# with the mention node below, and save the full updated document as page.json.
+docmost-cli page get <PAGE_ID> --content json --output json
+
+docmost-cli page edit <PAGE_ID> --format json --content-file page.json --output json
+docmost-cli page get <PAGE_ID> --content json --output json
+```
+
+Use this node in the containing paragraph's `content` array; preserve every other current node and attribute:
+
+```json
+{"type":"mention","attrs":{"entityType":"user","entityId":"<USER_ID>","label":"<NAME>"}}
+```
+
+Verify that the final JSON still has `"type":"mention"` with the intended `entityId`. A Markdown full-body replace flattens mentions back to `@Name` text.
 
 ## Attachments
 
