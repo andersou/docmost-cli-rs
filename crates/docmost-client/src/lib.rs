@@ -157,6 +157,7 @@ pub struct DocmostClient {
 pub struct DocmostClientBuilder {
     base: Url,
     token: Option<SecretString>,
+    insecure: bool,
 }
 
 impl DocmostClientBuilder {
@@ -181,14 +182,26 @@ impl DocmostClientBuilder {
             format!("{path}/api")
         };
         base.set_path(&(api_path.trim_start_matches('/').to_owned() + "/"));
-        Ok(Self { base, token: None })
+        Ok(Self {
+            base,
+            token: None,
+            insecure: false,
+        })
     }
     pub fn bearer_token(mut self, token: SecretString) -> Self {
         self.token = Some(token);
         self
     }
+    /// Disable TLS certificate validation for this API client only.
+    /// Disabled by default. Enabling this permits intercepted connections to
+    /// expose credentials and data; prefer trusting the server's CA instead.
+    pub fn insecure(mut self, insecure: bool) -> Self {
+        self.insecure = insecure;
+        self
+    }
     pub fn build(self) -> Result<DocmostClient, DocmostError> {
         let http = reqwest::Client::builder()
+            .danger_accept_invalid_certs(self.insecure)
             .timeout(REQUEST_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -1027,6 +1040,27 @@ pub struct Attachment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn insecure_builder_is_opt_in_and_can_be_reset() {
+        let builder = DocmostClient::builder("https://wiki.example.com").unwrap();
+        assert!(!builder.insecure);
+        let builder = builder.insecure(true);
+        assert!(builder.insecure);
+        let client = builder.build().unwrap();
+        assert_eq!(client.api_url().as_str(), "https://wiki.example.com/api/");
+        let builder = DocmostClient::builder("https://wiki.example.com")
+            .unwrap()
+            .insecure(true)
+            .insecure(false);
+        assert!(!builder.insecure);
+        assert!(builder.build().is_ok());
+        assert!(
+            !DocmostClient::builder("https://wiki.example.com")
+                .unwrap()
+                .insecure
+        );
+    }
 
     #[test]
     fn extracts_auth_token_from_cookie() {
