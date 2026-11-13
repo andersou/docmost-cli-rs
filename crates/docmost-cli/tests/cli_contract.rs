@@ -1,7 +1,7 @@
 use std::fs;
 
 use assert_cmd::Command;
-use predicates::str::contains;
+use predicates::{prelude::PredicateBooleanExt, str::contains};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 use wiremock::{
@@ -21,6 +21,31 @@ fn help_exposes_requested_command_groups() {
         .stdout(contains("page"))
         .stdout(contains("comment"))
         .stdout(contains("search"));
+}
+
+#[test]
+fn insecure_is_global_warns_on_stderr_and_does_not_persist() {
+    let directory = tempdir().unwrap();
+    let config = directory.path().join("missing.json");
+    for args in [
+        vec!["--insecure", "space", "list"],
+        vec!["space", "--insecure", "list"],
+        vec!["space", "list", "--insecure"],
+    ] {
+        docmost(&config, &args)
+            .assert()
+            .code(3)
+            .stdout("")
+            .stderr(contains(
+                "warning: --insecure disables TLS certificate validation",
+            ))
+            .stderr(contains("connections may be intercepted"));
+        assert!(!config.exists());
+    }
+    docmost(&config, &["space", "list"])
+        .assert()
+        .code(3)
+        .stderr(contains("warning: --insecure").not());
 }
 
 #[test]
@@ -142,7 +167,7 @@ async fn mount_login(server: &MockServer, email: &str, password: &str, token: &s
 }
 
 #[tokio::test]
-async fn login_stores_cookie_token_email_and_url_with_private_permissions() {
+async fn insecure_login_stores_session_but_not_tls_opt_in_with_private_permissions() {
     let server = MockServer::start().await;
     mount_login(&server, "ada@example.com", "s3cret", "login-token").await;
     let directory = tempdir().unwrap();
@@ -158,6 +183,7 @@ async fn login_stores_cookie_token_email_and_url_with_private_permissions() {
             "--email",
             "ada@example.com",
             "--password-stdin",
+            "--insecure",
         ],
     );
     command.write_stdin("s3cret\n");
@@ -1261,9 +1287,10 @@ async fn update_replaces_the_binary_after_verifying_the_checksum() {
     let directory = tempdir().unwrap();
     let binary = binary_copy(directory.path());
 
-    update_command(&binary, &server, &["--check"])
+    update_command(&binary, &server, &["--check", "--insecure"])
         .assert()
         .success()
+        .stderr("")
         .stdout(contains("\"update_available\": true"))
         .stdout(contains("\"latest\": \"9.9.9\""));
     assert_ne!(

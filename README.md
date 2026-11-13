@@ -75,6 +75,19 @@ printf '%s' "$DOCMOST_PASSWORD" | docmost-cli auth login --email "$DOCMOST_EMAIL
 
 The session token, email, and API URL are saved with mode `0600` to the platform configuration directory (macOS `~/Library/Application Support/docmost-cli/config.json`, Linux `~/.config/docmost-cli/config.json`), or to `DOCMOST_CONFIG` when that variable is set. `DOCMOST_AUTH_TOKEN` overrides the stored token for a single process and is never persisted.
 
+### Self-signed TLS certificates
+
+TLS certificate validation is enabled by default. Prefer installing your server's CA certificate in the system trust store. For temporary troubleshooting, explicitly opt in on each invocation:
+
+```sh
+docmost-cli --insecure --api-url https://wiki.example.com auth login --email you@example.com
+docmost-cli space list --insecure
+```
+
+**Warning:** `--insecure` disables TLS certificate validation, allowing intercepted connections to expose credentials, session tokens, and data. It emits a warning on stderr, is never saved in configuration, and must be supplied again for each invocation. The global flag may appear before or after subcommands. It applies only to Docmost API requests (including login, automatic re-login, and logout), not GitHub release checks or downloads made by `update`.
+
+Library users can opt in for one client with `DocmostClient::builder(url)?.insecure(true).build()?`; omit the option or use `.insecure(false)` to retain validation.
+
 ### Session renewal
 
 Docmost issues one session JWT (30 days by default) and no refresh token. The CLI keeps the session usable without wasted round trips:

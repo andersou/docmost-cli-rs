@@ -31,6 +31,9 @@ struct Cli {
     /// Docmost URL, with or without the /api suffix
     #[arg(long, global = true, env = "DOCMOST_API_URL")]
     api_url: Option<String>,
+    /// Disable TLS certificate validation for Docmost API requests (unsafe)
+    #[arg(long, global = true)]
+    insecure: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -647,8 +650,12 @@ fn api_url(cli_url: &Option<String>, config: &Config) -> Result<String, AppError
             )
         })
 }
-fn client(url: &str, access_token: Option<&str>) -> Result<DocmostClient, AppError> {
-    let builder = DocmostClient::builder(url)?;
+fn client(
+    url: &str,
+    access_token: Option<&str>,
+    insecure: bool,
+) -> Result<DocmostClient, AppError> {
+    let builder = DocmostClient::builder(url)?.insecure(insecure);
     let builder = match access_token {
         Some(token) => builder.bearer_token(SecretString::from(token.to_owned())),
         None => builder,
@@ -1581,6 +1588,7 @@ async fn run_authenticated(
     url: &str,
     config: &mut Config,
     allow_stored: bool,
+    insecure: bool,
     command: &Command,
     output: Output,
 ) -> Result<(), AppError> {
@@ -1596,7 +1604,7 @@ async fn run_authenticated(
         .as_deref()
         .is_none_or(|token| !session::is_expired(token));
     if access_usable {
-        let initial = client(url, access_token.as_deref())?;
+        let initial = client(url, access_token.as_deref(), insecure)?;
         match execute_authenticated(&initial, config, command, output).await {
             Ok(()) => return Ok(()),
             Err(error @ AppError::Client(DocmostError::Unauthorized { .. })) => {
@@ -1615,7 +1623,7 @@ async fn run_authenticated(
     else {
         return Err(last_error.unwrap_or_else(session_expired));
     };
-    let anonymous = client(url, None)?;
+    let anonymous = client(url, None, insecure)?;
     let token = anonymous
         .auth()
         .login(&LoginRequest {
@@ -1628,7 +1636,7 @@ async fn run_authenticated(
         config.auth_token = Some(token.expose_secret().to_owned());
         save_config(path, config)?;
     }
-    let retry = client(url, Some(token.expose_secret()))?;
+    let retry = client(url, Some(token.expose_secret()), insecure)?;
     execute_authenticated(&retry, config, command, output).await
 }
 
@@ -1673,7 +1681,7 @@ async fn login(
         rpassword::prompt_password("Docmost password: ")?
     };
     let password = SecretString::from(password);
-    let anonymous = client(url, None)?;
+    let anonymous = client(url, None, cli.insecure)?;
     let token = anonymous
         .auth()
         .login(&LoginRequest {
@@ -1719,7 +1727,11 @@ async fn logout(cli: &Cli, path: &PathBuf, config: &mut Config, url: &str) -> Re
     // be valid, then always drop the local credentials.
     let revoked = match config.auth_token.as_deref() {
         Some(token) if !session::is_expired(token) => {
-            match client(url, Some(token))?.auth().logout().await {
+            match client(url, Some(token), cli.insecure)?
+                .auth()
+                .logout()
+                .await
+            {
                 Ok(()) => true,
                 Err(DocmostError::Unauthorized { .. }) => false,
                 Err(error) => {
@@ -1809,6 +1821,11 @@ async fn run(cli: Cli) -> Result<(), AppError> {
     if let Command::Update(args) = &cli.command {
         return update_binary(cli.output, args).await;
     }
+    if cli.insecure {
+        eprintln!(
+            "warning: --insecure disables TLS certificate validation for Docmost API requests; connections may be intercepted"
+        );
+    }
     let path = config_path()?;
     let mut config = load_config(&path)?;
     let api_overridden = cli.api_url.is_some() || std::env::var_os("DOCMOST_API_URL").is_some();
@@ -1840,6 +1857,7 @@ async fn run(cli: Cli) -> Result<(), AppError> {
                 &url,
                 &mut config,
                 !api_overridden,
+                cli.insecure,
                 &cli.command,
                 cli.output,
             )
